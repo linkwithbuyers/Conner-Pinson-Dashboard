@@ -1,5 +1,4 @@
 "use client";
-
 import { useEffect, useMemo, useState } from "react";
 import {
   emailHref,
@@ -14,19 +13,13 @@ import {
   type LeadRecord,
 } from "../lib/campaign";
 import { sourceConfig } from "../lib/source-config";
-
-// Every client dashboard is served from the same github.io origin, so localStorage is
-// shared across all of them. Namespacing by Sheet id keeps each client's cached view,
-// pins and archive decisions separate instead of bleeding between dashboards.
 const STORE_NS = `:${sourceConfig.sheetId}`;
 const CACHE_KEY = `lwb-dashboard-last-good-view${STORE_NS}`;
 const SEEN_KEY = `lwb-dashboard-seen-action-items${STORE_NS}`;
 const ARCHIVE_KEY = `lwb-dashboard-archived-prospects${STORE_NS}`;
 const PINNED_KEY = `lwb-dashboard-pinned-prospects${STORE_NS}`;
 const NOTES_KEY = `lwb-dashboard-notes-override${STORE_NS}`;
-
 type CachedView = { records: LeadRecord[]; refreshedAt: string };
-
 function repairCachedView(view: CachedView): CachedView {
   return {
     ...view,
@@ -42,11 +35,9 @@ function repairCachedView(view: CachedView): CachedView {
     }),
   };
 }
-
 function archiveKey(record: LeadRecord) {
   return record.profileUrl || `${record.firstName}-${record.lastName}`.toLowerCase();
 }
-
 function readLocal<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
@@ -56,35 +47,29 @@ function readLocal<T>(key: string, fallback: T): T {
     return fallback;
   }
 }
-
 function saveLocal(key: string, value: unknown) {
   window.localStorage.setItem(key, JSON.stringify(value));
 }
-
 function WatchedIndicator({ date, complete }: { date: string; complete: boolean }) {
   return (
     <div className={`progress-indicator ${complete ? "complete" : ""}`}>
-      <span className="indicator-dot" aria-hidden="true">{complete ? "✓" : ""}</span>
+      <span className="indicator-dot" aria-hidden="true">{complete ? "\u2713" : ""}</span>
       <span>Video watched{date ? `: ${formatDateOnly(date)}` : complete ? ": date unavailable" : ""}</span>
     </div>
   );
 }
-
 function ContactValue({ href, text, fallback }: { href: string; text: string; fallback: string }) {
   if (!text) return <>{fallback}</>;
   if (!href) return <>{text}</>;
   return <a className="contact-link" href={href} onClick={(event) => event.stopPropagation()}>{text}</a>;
 }
-
 function LeadCard({ record, archived, pinned, onViewConversation, onArchive, onPin }: { record: LeadRecord; archived?: boolean; pinned?: boolean; onViewConversation: (record: LeadRecord) => void; onArchive: (record: LeadRecord) => void; onPin: (record: LeadRecord) => void }) {
   return (
     <article className="lead-card">
       <div className="lead-heading">
         <div>
           <h3>{record.fullName}</h3>
-          <p className="lead-title">
-            {[record.title, record.company].filter(Boolean).join(" at ") || "Profile details unavailable"}
-          </p>
+          <p className="lead-title">{[record.title, record.company].filter(Boolean).join(" at ") || "Profile details unavailable"}</p>
           <p className="contact-line"><span className="contact-label">email:</span> <ContactValue href={emailHref(record.email)} text={record.email} fallback="Email unavailable" /></p>
           <p className="contact-line"><span className="contact-label">tel:</span> <ContactValue href={phoneHref(record.phone)} text={formatPhone(record.phone)} fallback="Phone unavailable" /></p>
         </div>
@@ -102,104 +87,47 @@ function LeadCard({ record, archived, pinned, onViewConversation, onArchive, onP
           <button className={`card-toggle pin-button ${pinned ? "pinned" : ""}`} onClick={() => onPin(record)}>{pinned ? "Unpin" : "Pin"}</button>
           <button className="card-toggle conversation-button" onClick={() => onViewConversation(record)}>Initial Outreach</button>
           {record.profileUrl ? (
-            <a className="card-toggle linkedin-link" href={record.profileUrl} target="_blank" rel="noreferrer">
-              Open LinkedIn
-            </a>
+            <a className="card-toggle linkedin-link" href={record.profileUrl} target="_blank" rel="noreferrer">Open LinkedIn</a>
           ) : <span className="card-toggle unavailable-toggle">LinkedIn unavailable</span>}
         </div>
       </div>
     </article>
   );
 }
-
-function ConversationText({ record }: { record: LeadRecord }) {
+function ConversationText({ record, noteOverride, onSaveNote }: { record: LeadRecord; noteOverride?: string; onSaveNote: (record: LeadRecord, value: string) => void }) {
   const allowedSpeakers = new Set([
     ...record.senderName.toLowerCase().split(/\s+/),
     record.senderName.toLowerCase(),
     record.firstName.toLowerCase(),
     record.fullName.toLowerCase(),
   ]);
-
-  return (
-    <div className="conversation-full">
-      {(record.notes || "No conversation was included in this spreadsheet row.").split(/\r?\n/).map((line, index) => {
-        const match = line.match(/^\s*([^:\n]{1,70}):(.*)$/);
-        const speaker = match?.[1]?.trim() ?? "";
-        const message = match?.[2] ?? line;
-        const isKnownSpeaker = allowedSpeakers.has(speaker.toLowerCase()) || /^[A-Z]\.$/.test(speaker);
-
-        return (
-          <p className="message-line" key={`${index}-${line.slice(0, 20)}`}>
-            {match && isKnownSpeaker ? <><strong>{speaker}:</strong>{message}</> : line}
-          </p>
-        );
-      })}
-    </div>
-  );
-}function ConversationText({ record, noteOverride, onSaveNote }: { record: LeadRecord; noteOverride?: string; onSaveNote: (record: LeadRecord, value: string) => void }) {
-  const allowedSpeakers = new Set([
-    ...record.senderName.toLowerCase().split(/\s+/),
-    record.senderName.toLowerCase(),
-    record.firstName.toLowerCase(),
-    record.fullName.toLowerCase(),
-  ]);
-
-  const effectiveNotes = noteOverride ?? record.notes;
+  const effectiveNotes = noteOverride !== undefined ? noteOverride : record.notes;
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(effectiveNotes);
-
-  useEffect(() => {
-    setDraft(effectiveNotes);
-  }, [effectiveNotes]);
-
+  useEffect(() => { setDraft(effectiveNotes); }, [effectiveNotes]);
   if (isEditing) {
     return (
-      <div className="conversation-full conversation-editing">
-        <textarea
-          className="notes-editor"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          rows={12}
-        />
-        <div className="notes-editor-actions">
-          <button
-            className="card-toggle notes-save-button"
-            onClick={() => {
-              onSaveNote(record, draft);
-              setIsEditing(false);
-            }}
-          >
-            Save
-          </button>
-          <button
-            className="card-toggle notes-cancel-button"
-            onClick={() => {
-              setDraft(effectiveNotes);
-              setIsEditing(false);
-            }}
-          >
-            Cancel
-          </button>
+      <div className="conversation-full">
+        <textarea className="notes-editor" value={draft} onChange={(e) => setDraft(e.target.value)} rows={12} style={{width:"100%",marginBottom:"8px",padding:"8px",fontFamily:"inherit",fontSize:"inherit"}} />
+        <div style={{display:"flex",gap:"8px"}}>
+          <button className="card-toggle" onClick={() => { onSaveNote(record, draft); setIsEditing(false); }}>Save</button>
+          <button className="card-toggle" onClick={() => { setDraft(effectiveNotes); setIsEditing(false); }}>Cancel</button>
         </div>
       </div>
     );
   }
-
   return (
     <div className="conversation-full">
-      <div className="notes-editor-actions">
-        <button className="card-toggle notes-edit-button" onClick={() => setIsEditing(true)}>
-          Edit Notes
-        </button>
+      <div style={{marginBottom:"8px"}}>
+        <button className="card-toggle" onClick={() => setIsEditing(true)}>Edit Notes</button>
       </div>
       {(effectiveNotes || "No conversation was included in this spreadsheet row.").split(/\r?\n/).map((line, index) => {
         const match = line.match(/^\s*([^:\n]{1,70}):(.*)$/);
         const speaker = match?.[1]?.trim() ?? "";
         const message = match?.[2] ?? line;
         const isKnownSpeaker = allowedSpeakers.has(speaker.toLowerCase()) || /^[A-Z]\.$/.test(speaker);
-
         return (
-          <p className="message-line" key={`${index}-${line.slice(0, 20)}`}>
+          <p className="message-line" key={`${index}-${line.slice(0,20)}`}>
             {match && isKnownSpeaker ? <><strong>{speaker}:</strong>{message}</> : line}
           </p>
         );
@@ -207,7 +135,6 @@ function ConversationText({ record }: { record: LeadRecord }) {
     </div>
   );
 }
-
 export default function Home() {
   const [cached] = useState<CachedView>(() => repairCachedView(readLocal<CachedView>(CACHE_KEY, { records: [], refreshedAt: "" })));
   const [records, setRecords] = useState<LeadRecord[]>(cached.records);
@@ -220,7 +147,6 @@ export default function Home() {
   const [archivedKeys, setArchivedKeys] = useState<string[]>(() => readLocal<string[]>(ARCHIVE_KEY, []));
   const [pinnedKeys, setPinnedKeys] = useState<string[]>(() => readLocal<string[]>(PINNED_KEY, []));
   const [notesOverrides, setNotesOverrides] = useState<Record<string, string>>(() => readLocal<Record<string, string>>(NOTES_KEY, {}));
-
   const toggleArchive = (record: LeadRecord) => {
     const key = archiveKey(record);
     setArchivedKeys((current) => {
@@ -229,7 +155,6 @@ export default function Home() {
       return next;
     });
   };
-
   const togglePin = (record: LeadRecord) => {
     const key = archiveKey(record);
     setPinnedKeys((current) => {
@@ -238,23 +163,17 @@ export default function Home() {
       return next;
     });
   };
-  
-const saveNote = (record: LeadRecord, value: string) => {
-  const key = archiveKey(record);
-  setNotesOverrides((current) => {
-    const next = { ...current, [key]: value };
-    saveLocal(NOTES_KEY, next);
-    return next;
-  });
-};
-
+  const saveNote = (record: LeadRecord, value: string) => {
+    const key = archiveKey(record);
+    setNotesOverrides((current) => {
+      const next = { ...current, [key]: value };
+      saveLocal(NOTES_KEY, next);
+      return next;
+    });
+  };
   const refresh = async () => {
     const { sheetId, sheetGid } = sourceConfig;
-    if (!sheetId || !sheetGid) {
-      setError("The dashboard Sheet connection is not configured yet.");
-      return;
-    }
-
+    if (!sheetId || !sheetGid) { setError("The dashboard Sheet connection is not configured yet."); return; }
     setLoading(true);
     setError("");
     try {
@@ -263,13 +182,11 @@ const saveNote = (record: LeadRecord, value: string) => {
       if (!response.ok) throw new Error("The Sheet could not be read right now.");
       const nextRecords = normalizeRows(parseCsv(await response.text()));
       if (!nextRecords.length) throw new Error("The Sheet returned no usable activity records.");
-
       const knownIds = readLocal<string[]>(SEEN_KEY, []);
       const actions = nextRecords.filter((record) => record.priority <= 3);
       const firstLoad = knownIds.length === 0;
       setNewIds(firstLoad ? [] : actions.filter((record) => !knownIds.includes(record.id)).map((record) => record.id));
       saveLocal(SEEN_KEY, Array.from(new Set([...knownIds, ...actions.map((record) => record.id)])));
-
       const now = new Date().toISOString();
       setRecords(nextRecords);
       setRefreshedAt(now);
@@ -280,7 +197,6 @@ const saveNote = (record: LeadRecord, value: string) => {
       setLoading(false);
     }
   };
-
   const searchedRecords = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery) return records;
@@ -291,18 +207,16 @@ const saveNote = (record: LeadRecord, value: string) => {
         .includes(normalizedQuery),
     );
   }, [query, records]);
-
   const activeRecords = searchedRecords.filter((record) => !archivedKeys.includes(archiveKey(record)));
   const archivedRecords = searchedRecords.filter((record) => archivedKeys.includes(archiveKey(record)));
   const actionRecords = activeRecords.filter((record) => record.priority <= 3);
-  const actions = actionRecords
-    .sort((left, right) => {
-      const leftWatchTime = left.hasWatched ? Date.parse(left.watchedAt) || 0 : 0;
-      const rightWatchTime = right.hasWatched ? Date.parse(right.watchedAt) || 0 : 0;
-      const leftSentTime = Date.parse(left.videoSent) || 0;
-      const rightSentTime = Date.parse(right.videoSent) || 0;
-      return rightWatchTime - leftWatchTime || rightSentTime - leftSentTime || left.priority - right.priority || Date.parse(right.timestamp) - Date.parse(left.timestamp);
-    });
+  const actions = actionRecords.sort((left, right) => {
+    const leftWatchTime = left.hasWatched ? Date.parse(left.watchedAt) || 0 : 0;
+    const rightWatchTime = right.hasWatched ? Date.parse(right.watchedAt) || 0 : 0;
+    const leftSentTime = Date.parse(left.videoSent) || 0;
+    const rightSentTime = Date.parse(right.videoSent) || 0;
+    return rightWatchTime - leftWatchTime || rightSentTime - leftSentTime || left.priority - right.priority || Date.parse(right.timestamp) - Date.parse(left.timestamp);
+  });
   const pinned = activeRecords.filter((record) => pinnedKeys.includes(archiveKey(record)));
   const unpinnedActions = actions.filter((record) => !pinnedKeys.includes(archiveKey(record)));
   const archived = [...archivedRecords].sort((left, right) => {
@@ -312,32 +226,24 @@ const saveNote = (record: LeadRecord, value: string) => {
     const rightSentTime = Date.parse(right.videoSent) || 0;
     return rightWatchTime - leftWatchTime || rightSentTime - leftSentTime || Date.parse(right.timestamp) - Date.parse(left.timestamp);
   });
-
   const latestVideoDate = latestVideoSent(records);
   const isFirstLoad = !refreshedAt && !records.length;
-
+  void newIds;
   return (
     <main className="dashboard-shell">
       <header className="masthead">
         <div className="brand-lockup">
-          <div className="brand-mark">
-            <img src="./link-with-buyers-rabbit.png" alt="Link With Buyers rabbit logo" />
-          </div>
-          <div>
-            <p className="eyebrow">Link With Buyers</p>
-            <h1>Campaign Activity</h1>
-          </div>
+          <div className="brand-mark"><img src="./link-with-buyers-rabbit.png" alt="Link With Buyers rabbit logo" /></div>
+          <div><p className="eyebrow">Link With Buyers</p><h1>Campaign Activity</h1></div>
         </div>
         <div className="refresh-block">
           <button className="refresh-button" onClick={refresh} disabled={loading}>
-            {loading ? "Refreshing…" : records.length ? "Refresh Dashboard" : "Load Dashboard"}
+            {loading ? "Refreshing\u2026" : records.length ? "Refresh Dashboard" : "Load Dashboard"}
           </button>
           <p>{latestVideoDate ? `Latest Refresh: ${formatDateOnly(latestVideoDate)}` : "Latest Refresh will appear after loading the Sheet."}</p>
         </div>
       </header>
-
       {error ? <div className="notice error-notice">{error} {records.length ? "Your last saved view is still shown below." : ""}</div> : null}
-
       {isFirstLoad ? (
         <section className="empty-state">
           <p className="eyebrow">Ready when you are</p>
@@ -353,35 +259,18 @@ const saveNote = (record: LeadRecord, value: string) => {
           </section>
           {pinned.length ? (
             <section className="active-section" aria-live="polite">
-              <div className="subsection-heading">
-                <h3>Pinned Cards</h3>
-                <p>Prospects you have pinned for closer attention.</p>
-              </div>
-              <div className="lead-grid active-grid">
-                {pinned.map((record) => <LeadCard key={record.id} record={record} pinned archived={archivedKeys.includes(archiveKey(record))} onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} />)}
-              </div>
+              <div className="subsection-heading"><h3>Pinned Cards</h3><p>Prospects you have pinned for closer attention.</p></div>
+              <div className="lead-grid active-grid">{pinned.map((record) => <LeadCard key={record.id} record={record} pinned archived={archivedKeys.includes(archiveKey(record))} onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} />)}</div>
             </section>
           ) : null}
           <section className="all-cards-section" aria-live="polite">
-            <div className="subsection-heading">
-              <h3>Prospects</h3>
-              <p>Most recent video watch first, then most recent video sent.</p>
-            </div>
-            <div className="lead-grid">
-              {unpinnedActions.length ? unpinnedActions.map((record) => <LeadCard key={record.id} record={record} pinned={pinnedKeys.includes(archiveKey(record))} archived={archivedKeys.includes(archiveKey(record))} onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} />) : <p className="queue-empty">No prospects match this view.</p>}
-            </div>
+            <div className="subsection-heading"><h3>Prospects</h3><p>Most recent video watch first, then most recent video sent.</p></div>
+            <div className="lead-grid">{unpinnedActions.length ? unpinnedActions.map((record) => <LeadCard key={record.id} record={record} pinned={pinnedKeys.includes(archiveKey(record))} archived={archivedKeys.includes(archiveKey(record))} onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} />) : <p className="queue-empty">No prospects match this view.</p>}</div>
           </section>
-
           <section className="all-cards-section archive-section" aria-live="polite">
-            <div className="subsection-heading">
-              <h3>Archive</h3>
-              <p>Most recent video watch first.</p>
-            </div>
-            <div className="lead-grid">
-              {archived.length ? archived.map((record) => <LeadCard key={record.id} record={record} pinned={pinnedKeys.includes(archiveKey(record))} archived onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} />) : <p className="queue-empty">No archived prospects.</p>}
-            </div>
+            <div className="subsection-heading"><h3>Archive</h3><p>Most recent video watch first.</p></div>
+            <div className="lead-grid">{archived.length ? archived.map((record) => <LeadCard key={record.id} record={record} pinned={pinnedKeys.includes(archiveKey(record))} archived onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} />) : <p className="queue-empty">No archived prospects.</p>}</div>
           </section>
-
         </>
       )}
       {selectedRecord ? (
@@ -391,7 +280,7 @@ const saveNote = (record: LeadRecord, value: string) => {
               <div>
                 <p className="eyebrow">Initial Conversation</p>
                 <h2 id="conversation-title">{selectedRecord.fullName}</h2>
-                <p>{[selectedRecord.title, selectedRecord.company, selectedRecord.location].filter(Boolean).join(" · ") || "Profile details unavailable"}</p>
+                <p>{[selectedRecord.title, selectedRecord.company, selectedRecord.location].filter(Boolean).join(" \u00b7 ") || "Profile details unavailable"}</p>
               </div>
               <button className="close-button" onClick={() => setSelectedRecord(null)} aria-label="Close conversation">Close</button>
             </div>
