@@ -1,179 +1,9 @@
-"use client";
-import { useEffect, useMemo, useState } from "react";
-import {
-  emailHref,
-  formatActivityTime,
-  formatDateOnly,
-  formatPhone,
-  latestVideoSent,
-  normalizeRows,
-  parseCsv,
-  phoneHref,
-  simplifyLocation,
-  type LeadRecord,
-} from "../lib/campaign";
-import { sourceConfig } from "../lib/source-config";
-const STORE_NS = `:${sourceConfig.sheetId}`;
-const CACHE_KEY = `lwb-dashboard-last-good-view${STORE_NS}`;
-const SEEN_KEY = `lwb-dashboard-seen-action-items${STORE_NS}`;
-const ARCHIVE_KEY = `lwb-dashboard-archived-prospects${STORE_NS}`;
-const PINNED_KEY = `lwb-dashboard-pinned-prospects${STORE_NS}`;
-const NOTES_KEY = `lwb-dashboard-notes-override${STORE_NS}`;
-type CachedView = { records: LeadRecord[]; refreshedAt: string };
-function repairCachedView(view: CachedView): CachedView {
-  return {
-    ...view,
-    records: view.records.map((record) => {
-      const videoBlocked = /^0?1\/0?1\/(?:0?1|2001)$/i.test(record.videoSent);
-      const hasWatched = /\[video wat(?:ched|rched)\]/i.test(record.notes);
-      return {
-        ...record,
-        hasVideoSent: !videoBlocked && Boolean(record.videoSent),
-        hasWatched,
-        watchedAt: record.watchedAt ?? (hasWatched ? record.lastSearched : ""),
-      };
-    }),
-  };
-}
-function archiveKey(record: LeadRecord) {
-  return record.profileUrl || `${record.firstName}-${record.lastName}`.toLowerCase();
-}
-function readLocal<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const stored = window.localStorage.getItem(key);
-    return stored ? (JSON.parse(stored) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-function saveLocal(key: string, value: unknown) {
-  window.localStorage.setItem(key, JSON.stringify(value));
-}
-function WatchedIndicator({ date, complete }: { date: string; complete: boolean }) {
-  return (
-    <div className={`progress-indicator ${complete ? "complete" : ""}`}>
-      <span className="indicator-dot" aria-hidden="true">{complete ? "\u2713" : ""}</span>
-      <span>Video watched{date ? `: ${formatDateOnly(date)}` : complete ? ": date unavailable" : ""}</span>
-    </div>
-  );
-}
-function ContactValue({ href, text, fallback }: { href: string; text: string; fallback: string }) {
-  if (!text) return <>{fallback}</>;
-  if (!href) return <>{text}</>;
-  return <a className="contact-link" href={href} onClick={(event) => event.stopPropagation()}>{text}</a>;
-}
-function LeadCard({ record, archived, pinned, onViewConversation, onArchive, onPin }: { record: LeadRecord; archived?: boolean; pinned?: boolean; onViewConversation: (record: LeadRecord) => void; onArchive: (record: LeadRecord) => void; onPin: (record: LeadRecord) => void }) {
-  return (
-    <article className="lead-card">
-      <div className="lead-heading">
-        <div>
-          <h3>{record.fullName}</h3>
-          <p className="lead-title">{[record.title, record.company].filter(Boolean).join(" at ") || "Profile details unavailable"}</p>
-          <p className="contact-line"><span className="contact-label">email:</span> <ContactValue href={emailHref(record.email)} text={record.email} fallback="Email unavailable" /></p>
-          <p className="contact-line"><span className="contact-label">tel:</span> <ContactValue href={phoneHref(record.phone)} text={formatPhone(record.phone)} fallback="Phone unavailable" /></p>
-        </div>
-        {record.location ? <span className="location">{simplifyLocation(record.location)}</span> : null}
-      </div>
-      <div className="progress-indicators" aria-label="Video progress">
-        <span className="video-sent-text">Video sent{record.videoSent ? `: ${formatDateOnly(record.videoSent)}` : ""}</span>
-        <WatchedIndicator date={record.watchedAt} complete={record.hasWatched} />
-      </div>
-      {record.kind === "reply-before-video" ? <p className="manual-note">Stop video manually in the Sheet if needed.</p> : null}
-      {record.sourceIncomplete ? <p className="data-note">Some source details are incomplete.</p> : null}
-      <div className="card-footer">
-        <div className="card-actions card-toggle-actions">
-          <button className={`card-toggle archive-button ${archived ? "restore-button" : ""}`} onClick={() => onArchive(record)}>{archived ? "Restore" : "Archive"}</button>
-          <button className={`card-toggle pin-button ${pinned ? "pinned" : ""}`} onClick={() => onPin(record)}>{pinned ? "Unpin" : "Pin"}</button>
-          <button className="card-toggle conversation-button" onClick={() => onViewConversation(record)}>Initial Outreach</button>
-          {record.profileUrl ? (
-            <a className="card-toggle linkedin-link" href={record.profileUrl} target="_blank" rel="noreferrer">Open LinkedIn</a>
-          ) : <span className="card-toggle unavailable-toggle">LinkedIn unavailable</span>}
-        </div>
-      </div>
-    </article>
-  );
-}
-function ConversationText({ record, noteOverride, onSaveNote }: { record: LeadRecord; noteOverride?: string; onSaveNote: (record: LeadRecord, value: string) => void }) {
-  const allowedSpeakers = new Set([
-    ...record.senderName.toLowerCase().split(/\s+/),
-    record.senderName.toLowerCase(),
-    record.firstName.toLowerCase(),
-    record.fullName.toLowerCase(),
-  ]);
-  const effectiveNotes = noteOverride !== undefined ? noteOverride : record.notes;
-  const [isEditing, setIsEditing] = useState(false);
-  const [draft, setDraft] = useState(effectiveNotes);
-  useEffect(() => { setDraft(effectiveNotes); }, [effectiveNotes]);
-  if (isEditing) {
-    return (
-      <div className="conversation-full">
-        <textarea className="notes-editor" value={draft} onChange={(e) => setDraft(e.target.value)} rows={12} style={{width:"100%",marginBottom:"8px",padding:"8px",fontFamily:"inherit",fontSize:"inherit"}} />
-        <div style={{display:"flex",gap:"8px"}}>
-          <button className="card-toggle" onClick={() => { onSaveNote(record, draft); setIsEditing(false); }}>Save</button>
-          <button className="card-toggle" onClick={() => { setDraft(effectiveNotes); setIsEditing(false); }}>Cancel</button>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="conversation-full">
-      <div style={{marginBottom:"8px"}}>
-        <button className="card-toggle" onClick={() => setIsEditing(true)}>Edit Notes</button>
-      </div>
-      {(effectiveNotes || "No conversation was included in this spreadsheet row.").split(/\r?\n/).map((line, index) => {
-        const match = line.match(/^\s*([^:\n]{1,70}):(.*)$/);
-        const speaker = match?.[1]?.trim() ?? "";
-        const message = match?.[2] ?? line;
-        const isKnownSpeaker = allowedSpeakers.has(speaker.toLowerCase()) || /^[A-Z]\.$/.test(speaker);
-        return (
-          <p className="message-line" key={`${index}-${line.slice(0,20)}`}>
-            {match && isKnownSpeaker ? <><strong>{speaker}:</strong>{message}</> : line}
-          </p>
-        );
-      })}
-    </div>
-  );
-}
-export default function Home() {
-  const [cached] = useState<CachedView>(() => repairCachedView(readLocal<CachedView>(CACHE_KEY, { records: [], refreshedAt: "" })));
-  const [records, setRecords] = useState<LeadRecord[]>(cached.records);
-  const [refreshedAt, setRefreshedAt] = useState(cached.refreshedAt);
-  const [newIds, setNewIds] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [query, setQuery] = useState("");
-  const [selectedRecord, setSelectedRecord] = useState<LeadRecord | null>(null);
-  const [archivedKeys, setArchivedKeys] = useState<string[]>(() => readLocal<string[]>(ARCHIVE_KEY, []));
-  const [pinnedKeys, setPinnedKeys] = useState<string[]>(() => readLocal<string[]>(PINNED_KEY, []));
-  const [notesOverrides, setNotesOverrides] = useState<Record<string, string>>(() => readLocal<Record<string, string>>(NOTES_KEY, {}));
-  const toggleArchive = (record: LeadRecord) => {
-    const key = archiveKey(record);
-    setArchivedKeys((current) => {
-      const next = current.includes(key) ? current.filter((item) => item !== key) : [...current, key];
-      saveLocal(ARCHIVE_KEY, next);
-      return next;
-    });
-  };
-  const togglePin = (record: LeadRecord) => {
-    const key = archiveKey(record);
-    setPinnedKeys((current) => {
-      const next = current.includes(key) ? current.filter((item) => item !== key) : [...current, key];
-      saveLocal(PINNED_KEY, next);
-      return next;
-    });
-  };
-  const saveNote = (record: LeadRecord, value: string) => {
-    const key = archiveKey(record);
-    setNotesOverrides((current) => {
-      const next = { ...current, [key]: value };
-      saveLocal(NOTES_KEY, next);
-      return next;
-    });
-  };
   const refresh = async () => {
     const { sheetId, sheetGid } = sourceConfig;
-    if (!sheetId || !sheetGid) { setError("The dashboard Sheet connection is not configured yet."); return; }
+    if (!sheetId || !sheetGid) {
+      setError("The dashboard Sheet connection is not configured yet.");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -260,16 +90,16 @@ export default function Home() {
           {pinned.length ? (
             <section className="active-section" aria-live="polite">
               <div className="subsection-heading"><h3>Pinned Cards</h3><p>Prospects you have pinned for closer attention.</p></div>
-              <div className="lead-grid active-grid">{pinned.map((record) => <LeadCard key={record.id} record={record} pinned archived={archivedKeys.includes(archiveKey(record))} onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} />)}</div>
+              <div className="lead-grid active-grid">{pinned.map((record) => <LeadCard key={record.id} record={record} pinned archived={archivedKeys.includes(archiveKey(record))} noteOverride={notesOverrides[archiveKey(record)]} onSaveNote={saveNote} onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} />)}</div>
             </section>
           ) : null}
           <section className="all-cards-section" aria-live="polite">
             <div className="subsection-heading"><h3>Prospects</h3><p>Most recent video watch first, then most recent video sent.</p></div>
-            <div className="lead-grid">{unpinnedActions.length ? unpinnedActions.map((record) => <LeadCard key={record.id} record={record} pinned={pinnedKeys.includes(archiveKey(record))} archived={archivedKeys.includes(archiveKey(record))} onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} />) : <p className="queue-empty">No prospects match this view.</p>}</div>
+            <div className="lead-grid">{unpinnedActions.length ? unpinnedActions.map((record) => <LeadCard key={record.id} record={record} pinned={pinnedKeys.includes(archiveKey(record))} archived={archivedKeys.includes(archiveKey(record))} noteOverride={notesOverrides[archiveKey(record)]} onSaveNote={saveNote} onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} />) : <p className="queue-empty">No prospects match this view.</p>}</div>
           </section>
           <section className="all-cards-section archive-section" aria-live="polite">
             <div className="subsection-heading"><h3>Archive</h3><p>Most recent video watch first.</p></div>
-            <div className="lead-grid">{archived.length ? archived.map((record) => <LeadCard key={record.id} record={record} pinned={pinnedKeys.includes(archiveKey(record))} archived onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} />) : <p className="queue-empty">No archived prospects.</p>}</div>
+            <div className="lead-grid">{archived.length ? archived.map((record) => <LeadCard key={record.id} record={record} pinned={pinnedKeys.includes(archiveKey(record))} archived noteOverride={notesOverrides[archiveKey(record)]} onSaveNote={saveNote} onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} />) : <p className="queue-empty">No archived prospects.</p>}</div>
           </section>
         </>
       )}
@@ -284,7 +114,7 @@ export default function Home() {
               </div>
               <button className="close-button" onClick={() => setSelectedRecord(null)} aria-label="Close conversation">Close</button>
             </div>
-            <ConversationText record={selectedRecord} noteOverride={notesOverrides[archiveKey(selectedRecord)]} onSaveNote={saveNote} />
+            <ConversationText record={selectedRecord} />
             <div className="panel-footer">
               <span>{formatActivityTime(selectedRecord.timestamp)}</span>
               <div className="card-actions">
