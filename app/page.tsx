@@ -63,7 +63,40 @@ function ContactValue({ href, text, fallback }: { href: string; text: string; fa
   if (!href) return <>{text}</>;
   return <a className="contact-link" href={href} onClick={(event) => event.stopPropagation()}>{text}</a>;
 }
-function LeadCard({ record, archived, pinned, onViewConversation, onArchive, onPin }: { record: LeadRecord; archived?: boolean; pinned?: boolean; onViewConversation: (record: LeadRecord) => void; onArchive: (record: LeadRecord) => void; onPin: (record: LeadRecord) => void }) {
+function InlineNotesEditor({ record, noteOverride, onSaveNote }: { record: LeadRecord; noteOverride?: string; onSaveNote: (record: LeadRecord, value: string) => void }) {
+  const effectiveNotes = noteOverride !== undefined ? noteOverride : record.notes;
+  const [draft, setDraft] = useState(effectiveNotes);
+  const [dirty, setDirty] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+  useEffect(() => {
+    if (!dirty) setDraft(effectiveNotes);
+  }, [effectiveNotes, dirty]);
+  const commit = () => {
+    if (!dirty) return;
+    onSaveNote(record, draft);
+    setDirty(false);
+    setSavedFlash(true);
+    window.setTimeout(() => setSavedFlash(false), 1500);
+  };
+  return (
+    <div className="notes-inline" onClick={(event) => event.stopPropagation()}>
+      <div className="notes-inline-header">
+        <span className="contact-label">Notes</span>
+        {savedFlash ? <span className="notes-saved-flash">Saved</span> : dirty ? <span className="notes-dirty-flash">Unsaved</span> : null}
+      </div>
+      <textarea
+        className="notes-inline-editor"
+        value={draft}
+        onChange={(event) => { setDraft(event.target.value); setDirty(true); }}
+        onBlur={commit}
+        rows={4}
+        placeholder="Add notes for this prospect..."
+        style={{ width: "100%", padding: "8px", fontFamily: "inherit", fontSize: "0.9em", resize: "vertical", boxSizing: "border-box" }}
+      />
+    </div>
+  );
+}
+function LeadCard({ record, archived, pinned, noteOverride, onViewConversation, onArchive, onPin, onSaveNote }: { record: LeadRecord; archived?: boolean; pinned?: boolean; noteOverride?: string; onViewConversation: (record: LeadRecord) => void; onArchive: (record: LeadRecord) => void; onPin: (record: LeadRecord) => void; onSaveNote: (record: LeadRecord, value: string) => void }) {
   return (
     <article className="lead-card">
       <div className="lead-heading">
@@ -81,6 +114,7 @@ function LeadCard({ record, archived, pinned, onViewConversation, onArchive, onP
       </div>
       {record.kind === "reply-before-video" ? <p className="manual-note">Stop video manually in the Sheet if needed.</p> : null}
       {record.sourceIncomplete ? <p className="data-note">Some source details are incomplete.</p> : null}
+      <InlineNotesEditor record={record} noteOverride={noteOverride} onSaveNote={onSaveNote} />
       <div className="card-footer">
         <div className="card-actions card-toggle-actions">
           <button className={`card-toggle archive-button ${archived ? "restore-button" : ""}`} onClick={() => onArchive(record)}>{archived ? "Restore" : "Archive"}</button>
@@ -260,16 +294,16 @@ export default function Home() {
           {pinned.length ? (
             <section className="active-section" aria-live="polite">
               <div className="subsection-heading"><h3>Pinned Cards</h3><p>Prospects you have pinned for closer attention.</p></div>
-              <div className="lead-grid active-grid">{pinned.map((record) => <LeadCard key={record.id} record={record} pinned archived={archivedKeys.includes(archiveKey(record))} onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} />)}</div>
+              <div className="lead-grid active-grid">{pinned.map((record) => <LeadCard key={record.id} record={record} pinned archived={archivedKeys.includes(archiveKey(record))} noteOverride={notesOverrides[archiveKey(record)]} onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} onSaveNote={saveNote} />)}</div>
             </section>
           ) : null}
           <section className="all-cards-section" aria-live="polite">
             <div className="subsection-heading"><h3>Prospects</h3><p>Most recent video watch first, then most recent video sent.</p></div>
-            <div className="lead-grid">{unpinnedActions.length ? unpinnedActions.map((record) => <LeadCard key={record.id} record={record} pinned={pinnedKeys.includes(archiveKey(record))} archived={archivedKeys.includes(archiveKey(record))} onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} />) : <p className="queue-empty">No prospects match this view.</p>}</div>
+            <div className="lead-grid">{unpinnedActions.length ? unpinnedActions.map((record) => <LeadCard key={record.id} record={record} pinned={pinnedKeys.includes(archiveKey(record))} archived={archivedKeys.includes(archiveKey(record))} noteOverride={notesOverrides[archiveKey(record)]} onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} onSaveNote={saveNote} />) : <p className="queue-empty">No prospects match this view.</p>}</div>
           </section>
           <section className="all-cards-section archive-section" aria-live="polite">
             <div className="subsection-heading"><h3>Archive</h3><p>Most recent video watch first.</p></div>
-            <div className="lead-grid">{archived.length ? archived.map((record) => <LeadCard key={record.id} record={record} pinned={pinnedKeys.includes(archiveKey(record))} archived onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} />) : <p className="queue-empty">No archived prospects.</p>}</div>
+            <div className="lead-grid">{archived.length ? archived.map((record) => <LeadCard key={record.id} record={record} pinned={pinnedKeys.includes(archiveKey(record))} archived noteOverride={notesOverrides[archiveKey(record)]} onViewConversation={setSelectedRecord} onArchive={toggleArchive} onPin={togglePin} onSaveNote={saveNote} />) : <p className="queue-empty">No archived prospects.</p>}</div>
           </section>
         </>
       )}
