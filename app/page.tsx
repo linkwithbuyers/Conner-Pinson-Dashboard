@@ -64,7 +64,9 @@ function ContactValue({ href, text, fallback }: { href: string; text: string; fa
   return <a className="contact-link" href={href} onClick={(event) => event.stopPropagation()}>{text}</a>;
 }
 function InlineNotesEditor({ record, noteOverride, onSaveNote }: { record: LeadRecord; noteOverride?: string; onSaveNote: (record: LeadRecord, value: string) => void }) {
-  const effectiveNotes = noteOverride !== undefined ? noteOverride : record.notes;
+  // Column F verbatim. An empty Notes cell stays an empty box -- there is no
+  // fallback to column G at any time.
+  const effectiveNotes = noteOverride !== undefined ? noteOverride : record.notesCell;
   const [draft, setDraft] = useState(effectiveNotes);
   const [dirty, setDirty] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
@@ -135,7 +137,8 @@ function ConversationText({ record, noteOverride, onSaveNote }: { record: LeadRe
     record.firstName.toLowerCase(),
     record.fullName.toLowerCase(),
   ]);
-  const effectiveNotes = noteOverride !== undefined ? noteOverride : record.notes;
+  // Column G verbatim -- the LinkedIn transcript. Never mixed with column F.
+  const effectiveNotes = noteOverride !== undefined ? noteOverride : record.conversation;
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(effectiveNotes);
   useEffect(() => { setDraft(effectiveNotes); }, [effectiveNotes]);
